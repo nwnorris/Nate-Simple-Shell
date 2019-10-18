@@ -52,29 +52,24 @@ void Terminal::prompt()
 string Terminal::replace_cwd_wildcard(string phrase)
 {	
 	string original = phrase;
-	int loc = phrase.find("%");
-	if(loc > -1)
+	
+	int loc1, loc2;
+	loc1 = phrase.find("%");
+	phrase = phrase.substr(loc1+1, phrase.length());
+	loc2 = phrase.find("%");
+	if(loc1 >= 0 && loc2 >= 0)
 	{
-		int start = loc;
-		phrase = phrase.substr(start+1, phrase.length());
-		loc = phrase.find("%");
-		if(loc > -1)
+		string part1 = original.substr(0, loc1);
+		string part2 = original.substr(loc2 + loc1+2);
+		loc1++;
+		string wildcard_contents = original.substr(loc1, loc2);
+		string contents = "";
+		if(wildcard_contents == "PWD")
 		{
-			int end = loc+(start-1);
-			string wildcard_phrase = original.substr(start+1, end-2);
-			string content = "";
-			cout << wildcard_phrase << endl;
-			if(wildcard_phrase == "PWD")
-			{
-				content = get_cwd_string();
-			}
-			cout << "\t" << original.substr(0, start) << endl;
-			cout << "\t" << original.substr(end, original.length()) << endl;
-
-			original = original.substr(0, start) + content + original.substr(end, original.length());
+			contents = get_cwd_string();
 		}
+		return part1 + contents + part2;
 	}
-
 	return original;
 }
 
