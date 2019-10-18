@@ -15,6 +15,7 @@ public:
 	virtual ~Terminal();
 private:
 	void run();
+	void update_prompt();
 	int parse_cmd(char *, int);
 	int process_cmd(vector<string> *);
 	string replace_cwd_wildcard(string);

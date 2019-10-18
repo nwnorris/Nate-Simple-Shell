@@ -9,7 +9,7 @@ using namespace std;
 
 Terminal::Terminal()
 {
-	prompt_phrase = get_cwd_string() + ">";
+	update_prompt();
 	run();
 }
 
@@ -37,6 +37,10 @@ string Terminal::get_cwd_string()
 	return cwd_str;
 }
 
+void Terminal::update_prompt()
+{
+	prompt_phrase = get_cwd_string() + ">";
+}
 void Terminal::prompt()
 {
 	//cwd();
@@ -44,6 +48,7 @@ void Terminal::prompt()
 	write(STDOUT_FILENO, (prompt_phrase.c_str()), prompt_phrase.length());
 }
 
+//This function sucks. Fix pls. Sincerely you.
 string Terminal::replace_cwd_wildcard(string phrase)
 {	
 	string original = phrase;
@@ -55,13 +60,17 @@ string Terminal::replace_cwd_wildcard(string phrase)
 		loc = phrase.find("%");
 		if(loc > -1)
 		{
-			int end = loc+(original.length() - phrase.length()+1);
+			int end = loc+(start-1);
 			string wildcard_phrase = original.substr(start+1, end-2);
 			string content = "";
+			cout << wildcard_phrase << endl;
 			if(wildcard_phrase == "PWD")
 			{
 				content = get_cwd_string();
 			}
+			cout << "\t" << original.substr(0, start) << endl;
+			cout << "\t" << original.substr(end, original.length()) << endl;
+
 			original = original.substr(0, start) + content + original.substr(end, original.length());
 		}
 	}
@@ -96,6 +105,17 @@ int Terminal::process_cmd(vector<string> * args)
 			string newprompt = args->at(1);
 			newprompt = replace_cwd_wildcard(newprompt);
 			prompt_phrase = newprompt;
+		}
+	}
+
+	if(cmd == "cd")
+	{
+		if(args->size()-1 < 1)
+		{
+			write(STDOUT_FILENO, "usage: cd <path>\n", 17);
+		} else {
+			chdir(args->at(1).c_str());
+			update_prompt();
 		}
 	}
 

@@ -2,6 +2,5 @@
 
 int main()
 {
-	Terminal * x = new Terminal();
-	
+	Terminal * x = new Terminal();	
 }
