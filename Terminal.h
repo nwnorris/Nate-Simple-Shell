@@ -21,7 +21,9 @@ private:
 	string replace_cwd_wildcard(string);
 	void prompt();
 	string get_cwd_string();
+	char * get_cwd_char();
 	void cwd();
+	void dir(vector<string> *);
 	string prompt_phrase;
 };
 

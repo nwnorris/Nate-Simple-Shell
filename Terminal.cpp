@@ -4,6 +4,7 @@
 #include <vector>
 #include <iostream>
 #include "Terminal.h"
+#include "DirectoryReader.h"
 
 using namespace std;
 
@@ -37,6 +38,13 @@ string Terminal::get_cwd_string()
 	return cwd_str;
 }
 
+char * Terminal::get_cwd_char()
+{
+	char buff[256];
+	char * wd = getcwd(buff, 256);
+	return wd;
+}
+
 void Terminal::update_prompt()
 {
 	prompt_phrase = get_cwd_string() + ">";
@@ -48,7 +56,6 @@ void Terminal::prompt()
 	write(STDOUT_FILENO, (prompt_phrase.c_str()), prompt_phrase.length());
 }
 
-//This function sucks. Fix pls. Sincerely you.
 string Terminal::replace_cwd_wildcard(string phrase)
 {	
 	string original = phrase;
@@ -71,6 +78,34 @@ string Terminal::replace_cwd_wildcard(string phrase)
 		return part1 + contents + part2;
 	}
 	return original;
+}
+
+void Terminal::dir(vector<string> * args)
+{
+	int adate = 0;
+	int name = 0;
+	int type = 0;
+	if(args->size() > 1 && args->size() < 3)
+	{	
+		cout << args->at(1).substr(1,2) << endl;
+		if(args->at(1).substr(1,2) == "s=")
+		{
+			cout << "\033[32mU didn't handle this one bud\033[0;m\n";
+			string flag = args->at(1).substr(3);
+			if(flag == "adate") adate = 1;
+			else if(flag == "name") name = 1;
+			else if(flag == "type") type = 1;
+		}
+	}
+
+	DirectoryReader * dir = new DirectoryReader(get_cwd_string());
+	vector<string> * names = dir->getFiles(adate, name, type);
+
+	//Help with ASCII color codes: https://stackoverflow.com/questions/2616906/how-do-i-output-coloured-text-to-a-linux-terminal
+	for(int i = 0; i < names->size(); i++)
+	{
+		cout << "\033[1;36m" <<  names->at(i) << "\033[0;m" << endl;
+	}
 }
 
 int Terminal::process_cmd(vector<string> * args)
@@ -112,6 +147,11 @@ int Terminal::process_cmd(vector<string> * args)
 			chdir(args->at(1).c_str());
 			update_prompt();
 		}
+	}
+
+	if(cmd == "dir" || cmd == "ls")
+	{
+		dir(args);
 	}
 
 	return 1;
