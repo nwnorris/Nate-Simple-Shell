@@ -90,7 +90,6 @@ void Terminal::dir(vector<string> * args)
 		cout << args->at(1).substr(1,2) << endl;
 		if(args->at(1).substr(1,2) == "s=")
 		{
-			cout << "\033[32mU didn't handle this one bud\033[0;m\n";
 			string flag = args->at(1).substr(3);
 			if(flag == "adate") adate = 1;
 			else if(flag == "name") name = 1;
@@ -99,8 +98,14 @@ void Terminal::dir(vector<string> * args)
 	}
 
 	DirectoryReader * dir = new DirectoryReader(get_cwd_string());
-	vector<string> * names = dir->getFiles(adate, name, type);
+	vector<string> * dirs = dir->getFiles();
+	vector<string> * names = dir->sortFiles(adate, name, type);
 
+	if(dirs->size() > 0)
+	{
+		//debug
+		cout << "FOUND SOME DIRS" << endl;
+	}
 	//Help with ASCII color codes: https://stackoverflow.com/questions/2616906/how-do-i-output-coloured-text-to-a-linux-terminal
 	for(int i = 0; i < names->size(); i++)
 	{
