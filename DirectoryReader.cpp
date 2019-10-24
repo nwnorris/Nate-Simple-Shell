@@ -41,6 +41,7 @@ vector<string> * DirectoryReader::getFiles()
 		unsigned char element_type = first_element->d_type;
 		//No point pushing the . and .. FDs that we assume exist everywhere
 		//cout << "Successfully retrieved name and type for file." << endl;
+		
 		if(*element_name != ".." && *element_name != ".")
 		{
 			file_names->push_back(*element_name);
@@ -51,8 +52,6 @@ vector<string> * DirectoryReader::getFiles()
 				dirs->push_back(*element_name);
 			}
 		}
-
-
 	}
 
 	files = *file_names;

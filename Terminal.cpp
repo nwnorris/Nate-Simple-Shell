@@ -6,6 +6,7 @@
 #include <map>
 #include "Terminal.h"
 #include "DirectoryReader.h"
+#include <sys/wait.h>
 
 using namespace std;
 
@@ -139,6 +140,34 @@ void Terminal::dir(string dirName, vector<string> * args)
 	}
 }
 
+void sys_cmd(string cmd, vector<string> * args)
+{
+	//Check if command exists in /usr/bin
+	DirectoryReader * usrbin = new DirectoryReader(string("/usr/bin"));
+	usrbin->getFiles();
+	vector<string> cmds = *(usrbin->sortFiles(0, 0, 0));
+
+	vector<const char*> * chr_args = new vector<const char *>();
+	for(string a : *args)
+	{
+		chr_args->push_back(a.c_str());
+	}
+	chr_args->push_back(NULL);
+
+
+
+	if(find(cmds.begin(), cmds.end(), cmd ) != cmds.end())
+	{
+		pid_t child = fork();
+		if(child == 0)
+		{
+			execv(("usr/bin/" + cmd).c_str(), &(chr_args->data()));
+		} else {
+			waitpid(child, NULL, NULL);
+		}
+	}
+}
+
 int Terminal::process_cmd(vector<string> * args)
 {
 	//We know the first argument is always the command name
@@ -184,6 +213,9 @@ int Terminal::process_cmd(vector<string> * args)
 	{
 		dir(get_cwd_string(), args);
 	}
+
+	//Unknown command, try to exec it 
+	sys_cmd(cmd, args);
 
 	return 1;
 }
