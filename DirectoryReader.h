@@ -9,6 +9,7 @@ using namespace std;
 class DirectoryReader {
 public:
 	DirectoryReader(string);
+	virtual ~DirectoryReader();
 	vector<string> * getFiles();
 	vector<string> * sortFiles(int, int, int);
 private:

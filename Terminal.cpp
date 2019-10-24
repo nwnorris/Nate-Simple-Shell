@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <vector>
 #include <iostream>
+#include <map>
 #include "Terminal.h"
 #include "DirectoryReader.h"
 
@@ -80,36 +81,61 @@ string Terminal::replace_cwd_wildcard(string phrase)
 	return original;
 }
 
-void Terminal::dir(vector<string> * args)
+void Terminal::dir(string dirName, vector<string> * args)
 {
+	//Identify and parse flags
 	int adate = 0;
 	int name = 0;
 	int type = 0;
-	if(args->size() > 1 && args->size() < 3)
-	{	
-		cout << args->at(1).substr(1,2) << endl;
-		if(args->at(1).substr(1,2) == "s=")
+	int recursive = 0;
+	map<string, int> * flags = new map<string, int>();
+
+	int i = 0;
+	for(string arg: *args)
+	{
+		string identifier = arg.substr(0,2);
+		flags->insert(make_pair(identifier, i));
+		i++;
+	}
+
+	if(flags->find("-r") != flags->end())
+	{
+		if(args->at(flags->find("-r")->second).length() <= 2)
 		{
-			string flag = args->at(1).substr(3);
-			if(flag == "adate") adate = 1;
-			else if(flag == "name") name = 1;
-			else if(flag == "type") type = 1;
+			recursive = 1;
 		}
 	}
 
-	DirectoryReader * dir = new DirectoryReader(get_cwd_string());
-	vector<string> * dirs = dir->getFiles();
-	vector<string> * names = dir->sortFiles(adate, name, type);
-
-	if(dirs->size() > 0)
+	if(flags->find("-s") != flags->end())
 	{
-		//debug
-		cout << "FOUND SOME DIRS" << endl;
+		//cout << "Found -s flag" << endl;
+		string flag = args->at(flags->find("-s")->second).substr(3);
+		if(flag == "adate") adate = 1;
+		else if(flag == "name") name = 1;
+		else if(flag == "type") type = 1;
 	}
+
+	delete(flags);
+	//Now that flags are set, execute command
+	DirectoryReader * dreader = new DirectoryReader(dirName);
+	cout << "Initialized dreader for " << dirName << endl;
+	vector<string> dirs = *(dreader->getFiles()); //Retrieve files
+	vector<string> names = *(dreader->sortFiles(adate, name, type)); //Will sort if flag was passed
+	delete(dreader);
 	//Help with ASCII color codes: https://stackoverflow.com/questions/2616906/how-do-i-output-coloured-text-to-a-linux-terminal
-	for(int i = 0; i < names->size(); i++)
+	for(int i = 0; i < names.size(); i++)
 	{
-		cout << "\033[1;36m" <<  names->at(i) << "\033[0;m" << endl;
+		string out = "\033[1;36m" +  names.at(i) + "\033[0;m\n";
+		write(STDOUT_FILENO, out.c_str(), out.length());
+	}
+	write(STDOUT_FILENO, "\n", 1);
+	if(recursive && dirs.size() > 0)
+	{
+		for(string subdir : dirs)
+		{
+			write(STDOUT_FILENO, ("./" + subdir + "\n").c_str(), subdir.length()+3);
+			dir(subdir, args);
+		}
 	}
 }
 
@@ -156,7 +182,7 @@ int Terminal::process_cmd(vector<string> * args)
 
 	if(cmd == "dir" || cmd == "ls")
 	{
-		dir(args);
+		dir(get_cwd_string(), args);
 	}
 
 	return 1;
