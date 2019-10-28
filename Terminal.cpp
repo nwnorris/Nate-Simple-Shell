@@ -119,7 +119,6 @@ void Terminal::dir(string dirName, vector<string> * args)
 	delete(flags);
 	//Now that flags are set, execute command
 	DirectoryReader * dreader = new DirectoryReader(dirName);
-	cout << "Initialized dreader for " << dirName << endl;
 	vector<string> dirs = *(dreader->getFiles()); //Retrieve files
 	vector<string> names = *(dreader->sortFiles(adate, name, type)); //Will sort if flag was passed
 	delete(dreader);
@@ -140,6 +139,7 @@ void Terminal::dir(string dirName, vector<string> * args)
 	}
 }
 
+//Executes a command not found in this Terminal. Will execute any matching file in /usr/bin.
 void sys_cmd(string cmd, vector<string> * args)
 {
 	//Check if command exists in /usr/bin
@@ -147,24 +147,39 @@ void sys_cmd(string cmd, vector<string> * args)
 	usrbin->getFiles();
 	vector<string> cmds = *(usrbin->sortFiles(0, 0, 0));
 
-	vector<const char*> * chr_args = new vector<const char *>();
-	for(string a : *args)
+	if(find(cmds.begin(), cmds.end(), cmd) != cmds.end())
 	{
-		chr_args->push_back(a.c_str());
-	}
-	chr_args->push_back(NULL);
+		//Create char * [] of arguments for exec
+		char * new_args[(args->size()+1) * sizeof(char *)];
+		for(int i = 0; i < args->size(); i++)
+		{
+			//Must cast out of const char * 
+			new_args[i] = const_cast<char*>((args->at(i)).c_str());
+		}
+		new_args[(args->size())] = NULL;
 
+		/** DEBUG
+		for(int i  = 0; i < args->size(); i++)
+		{
+			cout << "\tIndex " << i << ": ";
+			cout << new_args[i] << endl;
+		}
+		*/
 
-
-	if(find(cmds.begin(), cmds.end(), cmd ) != cmds.end())
-	{
 		pid_t child = fork();
 		if(child == 0)
 		{
-			execv(("usr/bin/" + cmd).c_str(), &(chr_args->data()));
+			string path = "/usr/bin/" + cmd;
+			//cout << "[Kid] Execing: " << path << endl;
+			execv((path).c_str(), new_args);
+			
+			exit(0);
 		} else {
-			waitpid(child, NULL, NULL);
+			
+			waitpid(child, NULL, 0);
+			//cout << "[Parent] ID " << child << " returned." << endl;
 		}
+	
 	}
 }
 
@@ -176,17 +191,15 @@ int Terminal::process_cmd(vector<string> * args)
 	//command: "exit"
 	if(cmd == "exit")
 	{
-		return 0;
+		return -1;
 	}
-
-	//command: "cwd"
-	if(cmd == "cwd")
+	else if(cmd == "cwd")
 	{
 		cwd();
 		write(STDOUT_FILENO, "\n", 1);
+		return 0;
 	}
-
-	if(cmd == "setprompt")
+	else if(cmd == "setprompt")
 	{
 		if(args->size()-1 < 1)
 		{
@@ -196,9 +209,9 @@ int Terminal::process_cmd(vector<string> * args)
 			newprompt = replace_cwd_wildcard(newprompt);
 			prompt_phrase = newprompt;
 		}
+		return 0;
 	}
-
-	if(cmd == "cd")
+	else if(cmd == "cd")
 	{
 		if(args->size()-1 < 1)
 		{
@@ -207,17 +220,19 @@ int Terminal::process_cmd(vector<string> * args)
 			chdir(args->at(1).c_str());
 			update_prompt();
 		}
+		return 0;
 	}
-
-	if(cmd == "dir" || cmd == "ls")
+	else if(cmd == "dir" || cmd == "ls")
 	{
 		dir(get_cwd_string(), args);
+		return 0;
+	} else {
+		cout << "\tExecing system cmd\n";
+		//Unknown command, try to exec it 
+		sys_cmd(cmd, args);
+		return 0;
 	}
-
-	//Unknown command, try to exec it 
-	sys_cmd(cmd, args);
-
-	return 1;
+	return -1;
 }
 
 int Terminal::parse_cmd(char * cmd_word, int cmd_len)
@@ -234,9 +249,49 @@ int Terminal::parse_cmd(char * cmd_word, int cmd_len)
 		cmd = cmd.substr(space+1, cmd.length());
 	}
 	args->push_back(cmd);
-	
+
+	int begin = 0;
+	int end  = 0;
+
+	vector<vector<string> *> * cmds = new vector<vector<string> *>();
+	for(int i = 0; i < args->size(); i++)
+	{
+		if(args->at(i) == "|" || i == (args->size()-1))
+		{
+			end = i;
+			if(i == (args->size() - 1)) end = i+1;
+			
+			vector<string> * cmd = new vector<string>();
+			for(int j = begin; j < end; j++)
+			{
+				cmd->push_back(args->at(j));
+
+			}
+			cmds->push_back(cmd);
+			begin = i+1;
+		}
+	}
+
+	if(cmds->size() == 0)
+	{
+		cmds->push_back(args);
+	}
+
+	//Debug
+	/**
+	cout << "found " << cmds->size() << " piped cmds\n";
+	for(vector<string> * v : *cmds)
+	{
+		for(string s : *v)
+		{
+			cout << s << " ";
+		}
+		cout << endl;
+	}
+	*/
+
 	//Process command
-	return process_cmd(args);
+	return process_cmd(cmds->at(0));
 }
 
 void Terminal::run()
@@ -249,7 +304,7 @@ void Terminal::run()
 		int cmdlen = read(STDIN_FILENO, buff, 256);
 		int result = parse_cmd(buff, cmdlen);
 		//Some commands get run
-		if(result == 0)
+		if(result == -1)
 		{
 			running = 0;
 		}

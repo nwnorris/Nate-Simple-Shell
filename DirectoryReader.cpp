@@ -36,7 +36,9 @@ vector<string> * DirectoryReader::getFiles()
 	struct dirent * first_element;
 	while((first_element = readdir(dir_stream)) && (first_element != NULL))
 	{
-
+		//struct dirent * file;
+		//memcpy(first_element, file, sizeof(*first_element));
+		//cout << first_element->d_name << endl;
 		string * element_name = new string((first_element->d_name));
 		unsigned char element_type = first_element->d_type;
 		//No point pushing the . and .. FDs that we assume exist everywhere
