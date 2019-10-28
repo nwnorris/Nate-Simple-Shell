@@ -291,7 +291,39 @@ int Terminal::parse_cmd(char * cmd_word, int cmd_len)
 	*/
 
 	//Process command
-	return process_cmd(cmds->at(0));
+
+	int stdout_save = dup(STDOUT_FILENO);
+	int stdin_save = dup(STDIN_FILENO);
+
+	int p_fds[2];
+	pipe(p_fds);
+
+	dup2(p_fds[1], STDOUT_FILENO); //Point STDOUT to WRITE end of pipe
+	
+	pid_t child = fork();
+
+	
+
+	if(child == 0)
+	{
+		close(p_fds[0]); //Close READ end of pipe
+		process_cmd(cmds->at(1));
+	} else {
+		waitpid(child, 0, NULL);
+		dup2(p_fds[0], STDIN_FILENO); //Point READ end of pipe to STDIN
+		close(p_fds[1]); //Close WRITE end of pipe
+		dup2(STDOUT_FILENO, stdout_save); //Restore actual STDOUT
+		process_cmd(cmds->at(1));
+	}
+
+	return 0;
+	
+	
+	
+	
+
+
+	//return process_cmd(cmds->at(0));
 }
 
 void Terminal::run()
