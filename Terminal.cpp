@@ -1,6 +1,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <stdio.h>
+#include <fcntl.h>
 #include <vector>
 #include <iostream>
 #include <map>
@@ -143,12 +144,13 @@ void Terminal::dir(string dirName, vector<string> * args)
 void sys_cmd(string cmd, vector<string> * args)
 {
 	//Check if command exists in /usr/bin
+	string path = "/bin/";
 	DirectoryReader * usrbin = new DirectoryReader(string("/usr/bin"));
 	usrbin->getFiles();
 	vector<string> cmds = *(usrbin->sortFiles(0, 0, 0));
 
-	if(find(cmds.begin(), cmds.end(), cmd) != cmds.end())
-	{
+	if(find(cmds.begin(), cmds.end(), cmd) != cmds.end()) path = "/usr/bin/";
+
 		//Create char * [] of arguments for exec
 		char * new_args[(args->size()+1) * sizeof(char *)];
 		for(int i = 0; i < args->size(); i++)
@@ -169,18 +171,19 @@ void sys_cmd(string cmd, vector<string> * args)
 		pid_t child = fork();
 		if(child == 0)
 		{
-			string path = "/usr/bin/" + cmd;
+			path = path + cmd;
 			//cout << "[Kid] Execing: " << path << endl;
+			//cout << "[Kid] STDOUT is " << STDOUT_FILENO << endl;
 			execv((path).c_str(), new_args);
 			
 			exit(0);
 		} else {
 			
 			waitpid(child, NULL, 0);
+
 			//cout << "[Parent] ID " << child << " returned." << endl;
 		}
 	
-	}
 }
 
 int Terminal::process_cmd(vector<string> * args)
@@ -227,12 +230,17 @@ int Terminal::process_cmd(vector<string> * args)
 		dir(get_cwd_string(), args);
 		return 0;
 	} else {
-		cout << "\tExecing system cmd\n";
-		//Unknown command, try to exec it 
+ 		//Unknown command, try to exec it 
 		sys_cmd(cmd, args);
 		return 0;
 	}
 	return -1;
+}
+
+int * newPipe()
+{
+	int * p = new int[2];
+	return p;
 }
 
 int Terminal::parse_cmd(char * cmd_word, int cmd_len)
@@ -253,11 +261,16 @@ int Terminal::parse_cmd(char * cmd_word, int cmd_len)
 	int begin = 0;
 	int end  = 0;
 
+	//Parse entire commands with separators
+
 	vector<vector<string> *> * cmds = new vector<vector<string> *>();
+	vector<string> * separators = new vector<string>();
 	for(int i = 0; i < args->size(); i++)
 	{
-		if(args->at(i) == "|" || i == (args->size()-1))
+		if(args->at(i) == "|" || args->at(i) == ">" || args->at(i) == "<" || i == (args->size()-1))
 		{
+			if(args->at(i) == "|" || args->at(i) == ">" || args->at(i) == "<") separators->push_back(args->at(i));
+
 			end = i;
 			if(i == (args->size() - 1)) end = i+1;
 			
@@ -277,43 +290,63 @@ int Terminal::parse_cmd(char * cmd_word, int cmd_len)
 		cmds->push_back(args);
 	}
 
-	//Debug
-	/**
-	cout << "found " << cmds->size() << " piped cmds\n";
-	for(vector<string> * v : *cmds)
-	{
-		for(string s : *v)
-		{
-			cout << s << " ";
-		}
-		cout << endl;
-	}
-	*/
-
-	//Process command
-
 	int stdout_save = dup(STDOUT_FILENO);
-	int stdin_save = dup(STDIN_FILENO);
 
-	int p_fds[2];
-	pipe(p_fds);
-
-	dup2(p_fds[1], STDOUT_FILENO); //Point STDOUT to WRITE end of pipe
-	
-	pid_t child = fork();
-
-	
-
-	if(child == 0)
+	if(cmds->size() > 1 && separators->at(0) == "|")
 	{
-		close(p_fds[0]); //Close READ end of pipe
-		process_cmd(cmds->at(1));
-	} else {
-		waitpid(child, 0, NULL);
-		dup2(p_fds[0], STDIN_FILENO); //Point READ end of pipe to STDIN
-		close(p_fds[1]); //Close WRITE end of pipe
-		dup2(STDOUT_FILENO, stdout_save); //Restore actual STDOUT
-		process_cmd(cmds->at(1));
+		int p[2];
+		pipe(p);
+
+		if(fork() == 0)
+		{
+			dup2(p[1], STDOUT_FILENO);
+			process_cmd(cmds->at(0));
+			close(p[0]);
+			return -1;
+		} else {
+			waitpid(-1, NULL, 0);
+			close(p[1]); // Close write end of pipe
+		}
+		
+		if(fork() == 0)
+		{
+			close(p[1]);
+			dup2(p[0], STDIN_FILENO);
+			dup2(stdout_save, STDOUT_FILENO);
+			process_cmd(cmds->at(1));
+			return -1;
+		} else {
+			waitpid(-1, NULL, 0);
+		}
+
+		
+	} else if(cmds->size() > 1 && separators->at(0) == ">")
+	{
+		char * name = const_cast<char*>(cmds->at(1)->at(0).c_str());
+		int fd = open(name, O_CREAT|O_WRONLY, S_IRWXU);
+		if(fork() == 0)
+		{
+			dup2(fd, STDOUT_FILENO);
+			process_cmd(cmds->at(0));
+			return -1;
+		} else {
+			waitpid(-1, NULL, 0);
+		}
+	}  else if(cmds->size() > 1 && separators->at(0) == "<")
+	{
+		char * name = const_cast<char*>(cmds->at(1)->at(0).c_str());
+		int fd = open(name, O_RDONLY, S_IRWXU);
+		if(fork() == 0)
+		{
+			dup2(fd, STDIN_FILENO);
+			process_cmd(cmds->at(0));
+			return -1;
+		} else {
+			waitpid(-1, NULL, 0);
+		}
+	}
+	else {
+		return process_cmd(cmds->at(0));
 	}
 
 	return 0;
