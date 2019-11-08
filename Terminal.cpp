@@ -9,11 +9,38 @@
 #include "DirectoryReader.h"
 #include <sys/wait.h>
 #include <algorithm>
+#include <sys/stat.h>
+#include <signal.h>
+#include <poll.h>
 
 using namespace std;
 
+void sigint_handler(int signo)
+{
+	write(STDOUT_FILENO, "\n", 1);
+	
+}
+
+void Terminal::set_sigint_handler()
+{
+	struct sigaction * sigint_hand = new struct sigaction();
+	sigint_hand -> sa_handler = sigint_handler;
+	sigaction(SIGINT, sigint_hand, NULL);
+}
+
+void Terminal::create_fifos()
+{
+	string fifo_names[3] = {"MyShellNormal", "MyShellHighPriority", "MyShellResponse"};
+	for(int i = 0; i < 3; i++)
+	{
+		mkfifo(("/tmp/" + fifo_names[i]).c_str(), O_CREAT);
+	}
+}
+
 Terminal::Terminal()
 {
+	set_sigint_handler();
+	create_fifos();
 	update_prompt();
 	run();
 }
@@ -161,30 +188,16 @@ void sys_cmd(string cmd, vector<string> * args)
 		}
 		new_args[(args->size())] = NULL;
 
-		/** DEBUG
-		for(int i  = 0; i < args->size(); i++)
-		{
-			cout << "\tIndex " << i << ": ";
-			cout << new_args[i] << endl;
-		}
-		*/
-
 		pid_t child = fork();
 		if(child == 0)
 		{
 			path = path + cmd;
-			//cout << "[Kid] Execing: " << path << endl;
-			//cout << "[Kid] STDOUT is " << STDOUT_FILENO << endl;
 			execv((path).c_str(), new_args);
 			
 			exit(0);
 		} else {
-			
 			waitpid(child, NULL, 0);
-
-			//cout << "[Parent] ID " << child << " returned." << endl;
 		}
-	
 }
 
 int Terminal::process_cmd(vector<string> * args)
@@ -195,7 +208,7 @@ int Terminal::process_cmd(vector<string> * args)
 	//command: "exit"
 	if(cmd == "exit")
 	{
-		return -1;
+		exit(0);
 	}
 	else if(cmd == "cwd")
 	{
@@ -347,24 +360,34 @@ int Terminal::parse_cmd(char * cmd_word, int cmd_len)
 		}
 	}
 	else {
-		return process_cmd(cmds->at(0));
+
+		process_cmd(cmds->at(0));
+
 	}
+}
 
-	return 0;
-	
-	
-	
-	
-
-
-	//return process_cmd(cmds->at(0));
+void printMessage(int fifo)
+{
+	char * buff[256];
+	int amtRead = read(fifo, buff, 256);
+	write(STDOUT_FILENO, buff, amtRead);
 }
 
 void Terminal::run()
 {
 	int running = 1;
+
+
+	struct pollfd * fds = new pollfd[1];
+	fds[0].fd = open("/tmp/MyShellNormal", O_NONBLOCK | O_RDONLY);
+	fds[0].events = POLLRDNORM;
+
+	int normalFifoVal;
+
 	while(running)
 	{
+		normalFifoVal = poll(fds, 1, 0);
+
 		prompt();
 		char buff[256];
 		int cmdlen = read(STDIN_FILENO, buff, 256);
@@ -373,6 +396,12 @@ void Terminal::run()
 		if(result == -1)
 		{
 			running = 0;
+		}
+
+		if(normalFifoVal > 0)
+		{
+			cout << "A FIFO IS READY" << endl;
+			printMessage(fds[0].fd);
 		}
 	}
 }
