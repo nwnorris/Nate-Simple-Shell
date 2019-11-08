@@ -5,7 +5,9 @@
 #include <iostream>
 #include <dirent.h>
 #include <sys/stat.h>
+#include <algorithm>
 #include <time.h>
+#include <signal.h>
 #include <sys/types.h>
 #include "DirectoryReader.h"
 

@@ -8,6 +8,7 @@
 #include "Terminal.h"
 #include "DirectoryReader.h"
 #include <sys/wait.h>
+#include <algorithm>
 
 using namespace std;
 
