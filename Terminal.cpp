@@ -18,7 +18,7 @@ using namespace std;
 void sigint_handler(int signo)
 {
 	write(STDOUT_FILENO, "\n", 1);
-	
+
 }
 
 void Terminal::set_sigint_handler()
@@ -33,7 +33,7 @@ void Terminal::create_fifos()
 	string fifo_names[3] = {"MyShellNormal", "MyShellHighPriority", "MyShellResponse"};
 	for(int i = 0; i < 3; i++)
 	{
-		mkfifo(("/tmp/" + fifo_names[i]).c_str(), O_CREAT);
+		mkfifo(("/tmp/" + fifo_names[i]).c_str(), S_IRWXU);
 	}
 }
 
@@ -58,7 +58,7 @@ void Terminal::cwd()
 			break;
 		}
 		write(STDOUT_FILENO, wd + i, 1);
-	}	
+	}
 }
 
 string Terminal::get_cwd_string()
@@ -88,9 +88,9 @@ void Terminal::prompt()
 }
 
 string Terminal::replace_cwd_wildcard(string phrase)
-{	
+{
 	string original = phrase;
-	
+
 	int loc1, loc2;
 	loc1 = phrase.find("%");
 	phrase = phrase.substr(loc1+1, phrase.length());
@@ -111,144 +111,130 @@ string Terminal::replace_cwd_wildcard(string phrase)
 	return original;
 }
 
-void Terminal::dir(string dirName, vector<string> * args)
-{
-	//Identify and parse flags
-	int adate = 0;
-	int name = 0;
-	int type = 0;
-	int recursive = 0;
-	map<string, int> * flags = new map<string, int>();
+int dir(string cmd, vector<string> * args) {
 
-	int i = 0;
-	for(string arg: *args)
+	//Create char * [] of arguments for exec
+	cout << "Execing: ./dir.o ";
+	char * new_args[(args->size()+1) * sizeof(char *)];
+	for(int i = 1; i < args->size(); i++)
 	{
-		string identifier = arg.substr(0,2);
-		flags->insert(make_pair(identifier, i));
-		i++;
+		//Must cast out of const char *
+		cout << args->at(i) << " ";
+		new_args[i] = const_cast<char*>((args->at(i)).c_str());
 	}
+	cout << endl;
+	new_args[(args->size())] = NULL;
 
-	if(flags->find("-r") != flags->end())
+	pid_t child = fork();
+	if(child == 0)
 	{
-		if(args->at(flags->find("-r")->second).length() <= 2)
-		{
-			recursive = 1;
-		}
-	}
 
-	if(flags->find("-s") != flags->end())
-	{
-		//cout << "Found -s flag" << endl;
-		string flag = args->at(flags->find("-s")->second).substr(3);
-		if(flag == "adate") adate = 1;
-		else if(flag == "name") name = 1;
-		else if(flag == "type") type = 1;
+
+		execv("dir.o", new_args);
+		exit(0);
+	} else {
+		waitpid(child, NULL, 0);
+		return 0;
 	}
 
-	delete(flags);
-	//Now that flags are set, execute command
-	DirectoryReader * dreader = new DirectoryReader(dirName);
-	vector<string> dirs = *(dreader->getFiles()); //Retrieve files
-	vector<string> names = *(dreader->sortFiles(adate, name, type)); //Will sort if flag was passed
-	delete(dreader);
-	//Help with ASCII color codes: https://stackoverflow.com/questions/2616906/how-do-i-output-coloured-text-to-a-linux-terminal
-	for(int i = 0; i < names.size(); i++)
-	{
-		string out = "\033[1;36m" +  names.at(i) + "\033[0;m\n";
-		write(STDOUT_FILENO, out.c_str(), out.length());
-	}
-	write(STDOUT_FILENO, "\n", 1);
-	if(recursive && dirs.size() > 0)
-	{
-		for(string subdir : dirs)
-		{
-			write(STDOUT_FILENO, ("./" + subdir + "\n").c_str(), subdir.length()+3);
-			dir(subdir, args);
-		}
-	}
+}
+
+int file_exists_in_directory(string cmd, string directory) {
+	DirectoryReader * dir = new DirectoryReader(directory);
+	dir->getFiles();
+	vector<string> cmds = *(dir->sortFiles(0,0,0));
+	if(find(cmds.begin(), cmds.end(), cmd) == cmds.end())
+		return 1;
+	return 0;
+}
+
+string sys_cmd_searchpath(string cmd) {
+
+	string path = "";
+	//Check /bin/
+	if(file_exists_in_directory(cmd, string("/bin")) == 0) path = "/bin/";
+	//Check /usr/bin/
+	if(file_exists_in_directory(cmd, string("/usr/bin")) == 0)path = "/usr/bin/";
+
+	return path;
 }
 
 //Executes a command not found in this Terminal. Will execute any matching file in /usr/bin.
-void sys_cmd(string cmd, vector<string> * args)
+int sys_cmd(string cmd, vector<string> * args)
 {
-	//Check if command exists in /usr/bin
-	string path = "/bin/";
-	DirectoryReader * usrbin = new DirectoryReader(string("/usr/bin"));
-	usrbin->getFiles();
-	vector<string> cmds = *(usrbin->sortFiles(0, 0, 0));
+	string path = sys_cmd_searchpath(cmd);
+	if(path.length() > 0) {
+			//Create char * [] of arguments for exec
+			char * new_args[(args->size()+1) * sizeof(char *)];
+			for(int i = 0; i < args->size(); i++)
+			{
+				//Must cast out of const char *
+				new_args[i] = const_cast<char*>((args->at(i)).c_str());
+			}
+			new_args[(args->size())] = NULL;
 
-	if(find(cmds.begin(), cmds.end(), cmd) != cmds.end()) path = "/usr/bin/";
-
-		//Create char * [] of arguments for exec
-		char * new_args[(args->size()+1) * sizeof(char *)];
-		for(int i = 0; i < args->size(); i++)
-		{
-			//Must cast out of const char * 
-			new_args[i] = const_cast<char*>((args->at(i)).c_str());
-		}
-		new_args[(args->size())] = NULL;
-
-		pid_t child = fork();
-		if(child == 0)
-		{
-			path = path + cmd;
-			execv((path).c_str(), new_args);
-			
-			exit(0);
-		} else {
-			waitpid(child, NULL, 0);
+			pid_t child = fork();
+			if(child == 0)
+			{
+				path = path + cmd;
+				execv((path).c_str(), new_args);
+				return -1;
+			} else {
+				waitpid(child, NULL, 0);
+				return 0;
+			}
 		}
 }
 
 int Terminal::process_cmd(vector<string> * args)
 {
-	//We know the first argument is always the command name
-	string cmd = args->at(0);
+	if(args->size() >= 1) {
+		//We know the first argument is always the command name
+		string cmd = args->at(0);
 
-	//command: "exit"
-	if(cmd == "exit")
-	{
-		exit(0);
-	}
-	else if(cmd == "cwd")
-	{
-		cwd();
-		write(STDOUT_FILENO, "\n", 1);
-		return 0;
-	}
-	else if(cmd == "setprompt")
-	{
-		if(args->size()-1 < 1)
+		//command: "exit"
+		if(cmd == "exit")
 		{
-			write(STDOUT_FILENO, "usage: setprompt <prompt string>\n", 33);
-		} else {
-			string newprompt = args->at(1);
-			newprompt = replace_cwd_wildcard(newprompt);
-			prompt_phrase = newprompt;
+			exit(0);
 		}
-		return 0;
-	}
-	else if(cmd == "cd")
-	{
-		if(args->size()-1 < 1)
+		else if(cmd == "cwd")
 		{
-			write(STDOUT_FILENO, "usage: cd <path>\n", 17);
-		} else {
-			chdir(args->at(1).c_str());
-			update_prompt();
+			cwd();
+			write(STDOUT_FILENO, "\n", 1);
+			return 0;
 		}
-		return 0;
+		else if(cmd == "setprompt")
+		{
+			if(args->size()-1 < 1)
+			{
+				write(STDOUT_FILENO, "usage: setprompt <prompt string>\n", 33);
+			} else {
+				string newprompt = args->at(1);
+				newprompt = replace_cwd_wildcard(newprompt);
+				prompt_phrase = newprompt;
+			}
+			return 0;
+		}
+		else if(cmd == "cd")
+		{
+			if(args->size()-1 < 1)
+			{
+				write(STDOUT_FILENO, "usage: cd <path>\n", 17);
+			} else {
+				chdir(args->at(1).c_str());
+				update_prompt();
+			}
+			return 0;
+		}
+		else if(cmd == "dir" || cmd == "ls")
+		{
+			return dir(cmd, args);
+		} else {
+	 		//Unknown command, try to exec it
+			return sys_cmd(cmd, args);
+		}
+
 	}
-	else if(cmd == "dir" || cmd == "ls")
-	{
-		dir(get_cwd_string(), args);
-		return 0;
-	} else {
- 		//Unknown command, try to exec it 
-		sys_cmd(cmd, args);
-		return 0;
-	}
-	return -1;
 }
 
 int * newPipe()
@@ -259,6 +245,9 @@ int * newPipe()
 
 int Terminal::parse_cmd(char * cmd_word, int cmd_len)
 {
+	if(cmd_len == 1){
+		return 0;
+	}
 	//Convert to string and strip new line.
 	string cmd = (new string(cmd_word))->substr(0,cmd_len-1);
 	vector<string> * args = new vector<string>();
@@ -287,7 +276,7 @@ int Terminal::parse_cmd(char * cmd_word, int cmd_len)
 
 			end = i;
 			if(i == (args->size() - 1)) end = i+1;
-			
+
 			vector<string> * cmd = new vector<string>();
 			for(int j = begin; j < end; j++)
 			{
@@ -310,30 +299,32 @@ int Terminal::parse_cmd(char * cmd_word, int cmd_len)
 	{
 		int p[2];
 		pipe(p);
-
+		cout << "Piping!\n";
 		if(fork() == 0)
 		{
 			dup2(p[1], STDOUT_FILENO);
-			process_cmd(cmds->at(0));
+			int result = process_cmd(cmds->at(0));
 			close(p[0]);
-			return -1;
+			return result;
 		} else {
 			waitpid(-1, NULL, 0);
 			close(p[1]); // Close write end of pipe
+			return 0;
 		}
-		
+
 		if(fork() == 0)
 		{
 			close(p[1]);
 			dup2(p[0], STDIN_FILENO);
 			dup2(stdout_save, STDOUT_FILENO);
-			process_cmd(cmds->at(1));
-			return -1;
+			int result = process_cmd(cmds->at(1));
+			return result;
 		} else {
 			waitpid(-1, NULL, 0);
+			return 0;
 		}
 
-		
+
 	} else if(cmds->size() > 1 && separators->at(0) == ">")
 	{
 		char * name = const_cast<char*>(cmds->at(1)->at(0).c_str());
@@ -341,10 +332,11 @@ int Terminal::parse_cmd(char * cmd_word, int cmd_len)
 		if(fork() == 0)
 		{
 			dup2(fd, STDOUT_FILENO);
-			process_cmd(cmds->at(0));
-			return -1;
+			int result = process_cmd(cmds->at(0));
+			return result;
 		} else {
 			waitpid(-1, NULL, 0);
+			return 0;
 		}
 	}  else if(cmds->size() > 1 && separators->at(0) == "<")
 	{
@@ -353,17 +345,18 @@ int Terminal::parse_cmd(char * cmd_word, int cmd_len)
 		if(fork() == 0)
 		{
 			dup2(fd, STDIN_FILENO);
-			process_cmd(cmds->at(0));
-			return -1;
+			int result = process_cmd(cmds->at(0));
+			return result;
 		} else {
 			waitpid(-1, NULL, 0);
+			return 0;
 		}
 	}
 	else {
-
-		process_cmd(cmds->at(0));
-
+		int result = process_cmd(cmds->at(0));
+		return result;
 	}
+	return -1;
 }
 
 void printMessage(int fifo)
@@ -377,17 +370,14 @@ void Terminal::run()
 {
 	int running = 1;
 
-
 	struct pollfd * fds = new pollfd[1];
 	fds[0].fd = open("/tmp/MyShellNormal", O_NONBLOCK | O_RDONLY);
-	fds[0].events = POLLRDNORM;
+	fds[0].events = POLLRDNORM | POLLIN;
 
 	int normalFifoVal;
 
 	while(running)
 	{
-		normalFifoVal = poll(fds, 1, 0);
-
 		prompt();
 		char buff[256];
 		int cmdlen = read(STDIN_FILENO, buff, 256);
@@ -395,13 +385,19 @@ void Terminal::run()
 		//Some commands get run
 		if(result == -1)
 		{
+			cout << "Exiting, bye\n";
+			cout << getpid() << endl;
 			running = 0;
 		}
 
-		if(normalFifoVal > 0)
+		normalFifoVal = poll(fds, 1, 1);
+		for(int i = 0; i < 1; i++)
 		{
-			cout << "A FIFO IS READY" << endl;
-			printMessage(fds[0].fd);
+			short revents = fds[i].revents;
+			if(revents && POLLIN)
+			{
+				printMessage(fds[0].fd);
+			}
 		}
 	}
 }

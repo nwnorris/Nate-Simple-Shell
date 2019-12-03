@@ -23,7 +23,6 @@ private:
 	string get_cwd_string();
 	char * get_cwd_char();
 	void cwd();
-	void dir(string, vector<string> *);
 	void set_sigint_handler();
 	void create_fifos();
 	string prompt_phrase;
