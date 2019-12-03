@@ -143,9 +143,10 @@ int file_exists_in_directory(string cmd, string directory) {
 	DirectoryReader * dir = new DirectoryReader(directory);
 	dir->getFiles();
 	vector<string> cmds = *(dir->sortFiles(0,0,0));
-	if(find(cmds.begin(), cmds.end(), cmd) == cmds.end())
-		return 1;
-	return 0;
+	if(find(cmds.begin(), cmds.end(), cmd) != cmds.end()) {
+			return 0;
+	}
+	return -1;
 }
 
 string sys_cmd_searchpath(string cmd) {
