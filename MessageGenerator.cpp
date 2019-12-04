@@ -2,6 +2,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <iostream>
+#define WRITELN write(STDOUT_FILENO, "\n", 1)
 
 using namespace std;
 
@@ -14,6 +15,7 @@ int writeInputToFifo(int fifo_id, int * fifos) {
 	return result;
 }
 
+
 int main()
 {
 	//Setup variables
@@ -23,8 +25,8 @@ int main()
 
 	//Open fifos
 	int fifos[3];
-	fifos[2] = open("/tmp/MyShellNormal", O_CREAT|O_WRONLY, S_IRWXU);
-	fifos[1] = open("/tmp/MyShellHighPriority", O_CREAT|O_WRONLY, S_IRWXU);
+	fifos[2] = open("/tmp/MyShellNormal", O_WRONLY, S_IRWXU);
+	fifos[1] = open("/tmp/MyShellHighPriority", O_WRONLY, S_IRWXU);
 
 	while (running)
 	{
@@ -49,8 +51,12 @@ int main()
 			writeInputToFifo(userSelection, fifos);
 
 		} else if (userSelection == 3) {
-
-			//Do this part, idiot
+			fifos[0] = open("/tmp/MyShellResponse", O_RDONLY, S_IRWXU);
+			char * buff[256];
+			int amtRead = read(fifos[0], buff, 256);
+			write(STDOUT_FILENO, buff, amtRead);
+			WRITELN;
+			close(fifos[0]);
 
 		} else if(userSelection == 4)
 		{

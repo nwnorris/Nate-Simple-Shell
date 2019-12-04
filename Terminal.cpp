@@ -23,6 +23,21 @@ vector<pid_t> * background_pids;
 int normalFifo;
 int highPriorityFifo;
 
+void sendResponse(vector<string> * args) {
+	string response_towrite = "";
+	for(int i = 1; i < args->size(); i++) {
+		response_towrite += args->at(i) + " ";
+	}
+
+	int result = open("/tmp/MyShellResponse", O_WRONLY, S_IRWXU);
+	if(result == -1) {
+		write(STDOUT_FILENO, "Waiting for reader on myShellResponse...\n", 41);
+		while(result = open("/tmp/MyShellResponse", O_WRONLY, S_IRWXU) && result == -1){}
+	}
+	int amt_written = write(result, response_towrite.c_str(), response_towrite.length());
+	close(result);
+}
+
 void printMessage(int fifo)
 {
 	char * buff[256];
@@ -257,6 +272,8 @@ int process_cmd(vector<string> * args)
 		else if(cmd == "dir" || cmd == "ls")
 		{
 			return dir(args);
+		} else if (cmd == "respond") {
+			sendResponse(args);
 		} else {
 	 		//Unknown command, try to exec it
 			return sys_cmd(cmd, args);
