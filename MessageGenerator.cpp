@@ -23,8 +23,8 @@ int main()
 
 	//Open fifos
 	int fifos[3];
-	int fd = open("/tmp/MyShellNormal", O_CREAT|O_WRONLY, S_IRWXU);
-	fifos[2] = fd;
+	fifos[2] = open("/tmp/MyShellNormal", O_CREAT|O_WRONLY, S_IRWXU);
+	fifos[1] = open("/tmp/MyShellHighPriority", O_CREAT|O_WRONLY, S_IRWXU);
 
 	while (running)
 	{
@@ -49,7 +49,7 @@ int main()
 			writeInputToFifo(userSelection, fifos);
 
 		} else if (userSelection == 3) {
-			
+
 			//Do this part, idiot
 
 		} else if(userSelection == 4)

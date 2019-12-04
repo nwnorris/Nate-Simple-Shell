@@ -4,31 +4,49 @@
 #include <fcntl.h>
 #include <vector>
 #include <iostream>
-#include <map>
-#include "Terminal.h"
 #include "DirectoryReader.h"
 #include <sys/wait.h>
 #include <algorithm>
 #include <sys/stat.h>
 #include <signal.h>
 #include <poll.h>
+#include <pthread.h>
+#define WRITELN write(STDOUT_FILENO, "\n", 1)
 
 using namespace std;
 
-void sigint_handler(int signo)
-{
-	write(STDOUT_FILENO, "\n", 1);
+string prompt_phrase;
+int running = 1;
+vector<pid_t> * foreground_pids;
+vector<pid_t> * background_pids;
 
+int normalFifo;
+int highPriorityFifo;
+
+void printMessage(int fifo)
+{
+	char * buff[256];
+	int amtRead = read(fifo, buff, 256);
+	write(STDOUT_FILENO, buff, amtRead);
 }
 
-void Terminal::set_sigint_handler()
+void sigint_handler(int signo)
+{
+	if(foreground_pids->size() > 0) {
+		kill(foreground_pids->at(0), SIGKILL);
+	}
+
+	printMessage(highPriorityFifo);
+}
+
+void set_sigint_handler()
 {
 	struct sigaction * sigint_hand = new struct sigaction();
 	sigint_hand -> sa_handler = sigint_handler;
 	sigaction(SIGINT, sigint_hand, NULL);
 }
 
-void Terminal::create_fifos()
+void create_fifos()
 {
 	string fifo_names[3] = {"MyShellNormal", "MyShellHighPriority", "MyShellResponse"};
 	for(int i = 0; i < 3; i++)
@@ -37,17 +55,23 @@ void Terminal::create_fifos()
 	}
 }
 
-Terminal::Terminal()
-{
-	set_sigint_handler();
-	create_fifos();
-	update_prompt();
-	run();
+void * monitor_high_priority(void * args) {
+	struct pollfd * fds = new pollfd[1];
+	fds[0].fd = open("/tmp/MyShellHighPriority", O_RDONLY);
+	fds[0].events = POLLRDNORM | POLLIN;
+	highPriorityFifo = fds[0].fd;
+
+	while(running){
+		int fifo_val = poll(fds, 1, 1);
+
+		if(fifo_val > 0) {
+			raise(SIGINT);
+		}
+	}
+
 }
 
-Terminal::~Terminal(){}
-
-void Terminal::cwd()
+void cwd()
 {
 	char buff[256];
 	char * wd = getcwd(buff, 256);
@@ -61,7 +85,7 @@ void Terminal::cwd()
 	}
 }
 
-string Terminal::get_cwd_string()
+string get_cwd_string()
 {
 	char buff[256];
 	char * wd = getcwd(buff, 256);
@@ -69,25 +93,25 @@ string Terminal::get_cwd_string()
 	return cwd_str;
 }
 
-char * Terminal::get_cwd_char()
+char * get_cwd_char()
 {
 	char buff[256];
 	char * wd = getcwd(buff, 256);
 	return wd;
 }
 
-void Terminal::update_prompt()
+void update_prompt()
 {
 	prompt_phrase = get_cwd_string() + ">";
 }
-void Terminal::prompt()
+void prompt()
 {
 	//cwd();
 	//write(STDOUT_FILENO, &">", 1);
 	write(STDOUT_FILENO, (prompt_phrase.c_str()), prompt_phrase.length());
 }
 
-string Terminal::replace_cwd_wildcard(string phrase)
+string replace_cwd_wildcard(string phrase)
 {
 	string original = phrase;
 
@@ -111,12 +135,13 @@ string Terminal::replace_cwd_wildcard(string phrase)
 	return original;
 }
 
-int dir(string cmd, vector<string> * args) {
+int dir(vector<string> * args) {
 
 	//Create char * [] of arguments for exec
-	cout << "Execing: ./dir.o ";
+	cout << "Execing: ";
 	char * new_args[(args->size()+1) * sizeof(char *)];
-	for(int i = 1; i < args->size(); i++)
+	args->at(0) = "dir.o";
+	for(int i = 0; i < args->size(); i++)
 	{
 		//Must cast out of const char *
 		cout << args->at(i) << " ";
@@ -128,12 +153,12 @@ int dir(string cmd, vector<string> * args) {
 	pid_t child = fork();
 	if(child == 0)
 	{
-
-
 		execv("dir.o", new_args);
 		exit(0);
 	} else {
+		foreground_pids->push_back(child);
 		waitpid(child, NULL, 0);
+		foreground_pids->clear();
 		return 0;
 	}
 
@@ -181,13 +206,15 @@ int sys_cmd(string cmd, vector<string> * args)
 				execv((path).c_str(), new_args);
 				return -1;
 			} else {
+				foreground_pids->push_back(child);
 				waitpid(child, NULL, 0);
+				foreground_pids->clear();
 				return 0;
 			}
 		}
 }
 
-int Terminal::process_cmd(vector<string> * args)
+int process_cmd(vector<string> * args)
 {
 	if(args->size() >= 1) {
 		//We know the first argument is always the command name
@@ -196,12 +223,12 @@ int Terminal::process_cmd(vector<string> * args)
 		//command: "exit"
 		if(cmd == "exit")
 		{
-			exit(0);
+			return -1;
 		}
 		else if(cmd == "cwd")
 		{
 			cwd();
-			write(STDOUT_FILENO, "\n", 1);
+			WRITELN;
 			return 0;
 		}
 		else if(cmd == "setprompt")
@@ -229,7 +256,7 @@ int Terminal::process_cmd(vector<string> * args)
 		}
 		else if(cmd == "dir" || cmd == "ls")
 		{
-			return dir(cmd, args);
+			return dir(args);
 		} else {
 	 		//Unknown command, try to exec it
 			return sys_cmd(cmd, args);
@@ -244,7 +271,7 @@ int * newPipe()
 	return p;
 }
 
-int Terminal::parse_cmd(char * cmd_word, int cmd_len)
+int parse_cmd(char * cmd_word, int cmd_len)
 {
 	if(cmd_len == 1){
 		return 0;
@@ -300,28 +327,29 @@ int Terminal::parse_cmd(char * cmd_word, int cmd_len)
 	{
 		int p[2];
 		pipe(p);
-		cout << "Piping!\n";
-		if(fork() == 0)
+
+		pid_t child = fork();
+		if(child == 0)
 		{
 			dup2(p[1], STDOUT_FILENO);
 			int result = process_cmd(cmds->at(0));
 			close(p[0]);
-			return result;
+			exit(0);
 		} else {
-			waitpid(-1, NULL, 0);
+			waitpid(child, NULL, 0);
 			close(p[1]); // Close write end of pipe
-			return 0;
 		}
 
-		if(fork() == 0)
+		child = fork();
+		if(child == 0)
 		{
 			close(p[1]);
 			dup2(p[0], STDIN_FILENO);
 			dup2(stdout_save, STDOUT_FILENO);
-			int result = process_cmd(cmds->at(1));
-			return result;
+			process_cmd(cmds->at(1));
+			exit(0);
 		} else {
-			waitpid(-1, NULL, 0);
+			waitpid(child, NULL, 0);
 			return 0;
 		}
 
@@ -330,26 +358,28 @@ int Terminal::parse_cmd(char * cmd_word, int cmd_len)
 	{
 		char * name = const_cast<char*>(cmds->at(1)->at(0).c_str());
 		int fd = open(name, O_CREAT|O_WRONLY, S_IRWXU);
-		if(fork() == 0)
+		pid_t child = fork();
+		if(child== 0)
 		{
 			dup2(fd, STDOUT_FILENO);
 			int result = process_cmd(cmds->at(0));
-			return result;
+			exit(0);
 		} else {
-			waitpid(-1, NULL, 0);
+			waitpid(child, NULL, 0);
 			return 0;
 		}
 	}  else if(cmds->size() > 1 && separators->at(0) == "<")
 	{
 		char * name = const_cast<char*>(cmds->at(1)->at(0).c_str());
 		int fd = open(name, O_RDONLY, S_IRWXU);
-		if(fork() == 0)
+		pid_t child = fork();
+		if(child == 0)
 		{
 			dup2(fd, STDIN_FILENO);
 			int result = process_cmd(cmds->at(0));
-			return result;
+			exit(0);
 		} else {
-			waitpid(-1, NULL, 0);
+			waitpid(child, NULL, 0);
 			return 0;
 		}
 	}
@@ -360,20 +390,13 @@ int Terminal::parse_cmd(char * cmd_word, int cmd_len)
 	return -1;
 }
 
-void printMessage(int fifo)
+void run()
 {
-	char * buff[256];
-	int amtRead = read(fifo, buff, 256);
-	write(STDOUT_FILENO, buff, amtRead);
-}
-
-void Terminal::run()
-{
-	int running = 1;
 
 	struct pollfd * fds = new pollfd[1];
 	fds[0].fd = open("/tmp/MyShellNormal", O_NONBLOCK | O_RDONLY);
 	fds[0].events = POLLRDNORM | POLLIN;
+	normalFifo = fds[0].fd;
 
 	int normalFifoVal;
 
@@ -386,8 +409,6 @@ void Terminal::run()
 		//Some commands get run
 		if(result == -1)
 		{
-			cout << "Exiting, bye\n";
-			cout << getpid() << endl;
 			running = 0;
 		}
 
@@ -401,4 +422,27 @@ void Terminal::run()
 			}
 		}
 	}
+}
+
+pthread_t * launch_monitor_thread() {
+	pthread_t monitor_thread;
+	pthread_create(&monitor_thread, NULL, monitor_high_priority, NULL);
+	return &monitor_thread;
+}
+
+int main()
+{
+	foreground_pids = new vector<pid_t>();
+	background_pids = new vector<pid_t>();
+	set_sigint_handler();
+	create_fifos();
+	update_prompt();
+
+	pthread_t * monitor_thread = launch_monitor_thread();
+	run();
+
+	pthread_join(*monitor_thread, NULL);
+
+	delete(foreground_pids);
+	delete(background_pids);
 }
