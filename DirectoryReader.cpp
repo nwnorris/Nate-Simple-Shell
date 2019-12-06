@@ -1,3 +1,8 @@
+/*
+Author: Nate Norris
+Project: Linux Programming | Project 3 | Fall '19
+*/
+
 #include <string.h>
 #include <unistd.h>
 #include <stdio.h>
@@ -45,7 +50,7 @@ vector<string> * DirectoryReader::getFiles()
 		unsigned char element_type = first_element->d_type;
 		//No point pushing the . and .. FDs that we assume exist everywhere
 		//cout << "Successfully retrieved name and type for file." << endl;
-		
+
 		if(*element_name != ".." && *element_name != ".")
 		{
 			file_names->push_back(*element_name);
@@ -67,7 +72,7 @@ vector<string> * DirectoryReader::getFiles()
 
 DirectoryReader::~DirectoryReader()
 {
-	
+
 }
 
 vector<string> * DirectoryReader::sortFiles(int adate, int name, int type)
@@ -121,7 +126,7 @@ vector<string> * DirectoryReader::sortFiles(int adate, int name, int type)
 			struct stat sb;
 			for(int i = 0; i < file_names->size(); i++)
 			{
-				
+
 				stat(file_names->at(i).c_str(), &sb);
 				dirInfo di;
 				di.name = file_names->at(i);

@@ -13,12 +13,25 @@
 
 using namespace std;
 
-void getFiles(char * dir_name, vector<const char *> * flags);
+int DIR_RECURSIVE = 0;
+int DIR_INTENSE = 0;
+int DIR_SORT = 0;
+int DIR_SORT_NAME = 0;
+int DIR_SORT_ADATE = 0;
+int DIR_SORT_TYPE = 0;
 
-void printFiles(vector<string> * fileNames) {
+void getFiles(char * dir_name);
+vector<string> * sortFiles(int adate, int name, int type, vector<string> * file_names, vector<unsigned char> * file_types);
 
-	for (int i = 0; i < fileNames->size(); i++) {
-		string file = fileNames->at(i);
+void printFiles(vector<string> * fileNames, vector<unsigned char> * fileTypes) {
+
+	vector<string> * files = fileNames;
+	if(DIR_SORT) {
+		files = sortFiles(DIR_SORT_ADATE, DIR_SORT_NAME, DIR_SORT_TYPE, fileNames, fileTypes);
+	}
+
+	for (int i = 0; i < files->size(); i++) {
+		string file = files->at(i);
 		write(STDOUT_FILENO, file.c_str(),file.length());
 		WRITELN;
 	}
@@ -27,7 +40,7 @@ void printFiles(vector<string> * fileNames) {
 
 }
 
-void recursivePrintFiles(vector<string> * fileNames, vector<unsigned char> * fileTypes, vector<const char *> * flags) {
+void recursivePrintFiles(vector<string> * fileNames, vector<unsigned char> * fileTypes) {
 	//Print current directory
 	char cwd[PATH_MAX];
 	getcwd(cwd, PATH_MAX);
@@ -46,6 +59,8 @@ void recursivePrintFiles(vector<string> * fileNames, vector<unsigned char> * fil
 		}
 	}
 
+	printFiles(fileNames, fileTypes);
+
 	//Print for each sub-directory
 	for (int i = 0; i < directories->size(); i++) {
 		//Change directories to the sub-directory
@@ -53,7 +68,7 @@ void recursivePrintFiles(vector<string> * fileNames, vector<unsigned char> * fil
 		char * directory_cstr = const_cast<char *>(directory.c_str());
 		chdir(directory_cstr);
 		//Retrieve all the files in the sub-directory
-		getFiles(".", flags);
+		getFiles(".");
 		//Change directories back to the parent
 		chdir(cwd);
 		WRITELN;
@@ -72,7 +87,7 @@ bool sort_di(dirInfo d1, dirInfo d2)
 	return (d1.atime < d2.atime);
 }
 
-void getFiles(char * dir_name, vector<const char *> * flags)
+void getFiles(char * dir_name)
 {
 	char cwd[PATH_MAX];
 	getcwd(cwd, PATH_MAX);
@@ -93,16 +108,6 @@ void getFiles(char * dir_name, vector<const char *> * flags)
 	delete(str_dir_name);
 
 	DIR * dir_stream = opendir(dir_name);
-	if(dir_stream == NULL) {
-		cout<< "FUCK\n";
-		if(errno == ENFILE){
-			cout << "ENFILE\n";
-		} else if(errno == EMFILE) {
-			cout << "EMFILE\n";
-		} else if(errno == ENOENT) {
-			cout << "ENOENT\n";
-		}
-	}
 
 	vector<string> * file_names = new vector<string>();
 	vector<unsigned char> * file_types = new vector<unsigned char>();
@@ -126,38 +131,14 @@ void getFiles(char * dir_name, vector<const char *> * flags)
 	}
 
 	closedir(dir_stream);
-
-	//All possible flags
-	int DIR_RECURSIVE = 0;
-	int DIR_INTENSE = 0;
-	int DIR_SORT = 0;
-	int DIR_SORT_NAME = 0;
-	int DIR_SORT_ADATE = 0;
-	int DIR_SORT_TYPE = 0;
-
-	for(int i = 0; i < flags->size(); i++) {
-		char * flag = const_cast<char *>(flags->at(i));
-		int counter = 0;
-		while(flag[counter] != '\0') {
-			if(flag[counter] == 'r') {
-				DIR_RECURSIVE = 1;
-			} else if (flag[counter] == 'i') {
-				DIR_INTENSE = 1;
-			} else if (flag[counter] == 's') {
-				//Still todo here
-			}
-			counter++;
-		}
-	}
-
 	//if(DIR_RECURSIVE) cout << "Found flag: -r\n";
 	//if(DIR_INTENSE) cout << "Found flag: -i\n";
 
 	//Flags parsed, time to print.
 	if(!DIR_RECURSIVE) {
-		printFiles(file_names);
+		printFiles(file_names, file_types);
 	}	else {
-		recursivePrintFiles(file_names, file_types, flags);
+		recursivePrintFiles(file_names, file_types);
 	}
 
 	//Done printing!
@@ -237,6 +218,54 @@ vector<string> * sortFiles(int adate, int name, int type, vector<string> * file_
 	}
 }
 
+void setFlags(vector<const char *> * flags) {
+	//Reset all possible flags
+	DIR_RECURSIVE = 0;
+	DIR_INTENSE = 0;
+	DIR_SORT = 0;
+	DIR_SORT_NAME = 0;
+	DIR_SORT_ADATE = 0;
+	DIR_SORT_TYPE = 0;
+	int sort_flag_start = 0;
+	for(int i = 0; i < flags->size(); i++) {
+		char * flag = const_cast<char *>(flags->at(i));
+		int counter = 0;
+		sort_flag_start = 0;
+		while(flag[counter] != '\0') {
+
+			const char letter = flag[counter];
+			if(letter == 'r') {
+				DIR_RECURSIVE = 1;
+			} else if (letter == 'i') {
+				DIR_INTENSE = 1;
+			} else if (strcmp(&letter, "=") == 2) {
+				sort_flag_start = counter+1;
+			}
+			counter++;
+		}
+
+		if(sort_flag_start > 0) {
+			char * sort_type = flag + sort_flag_start;
+			if(strcmp(sort_type, "type") == 0) {
+				DIR_SORT = 1;
+				DIR_SORT_TYPE = 1;
+				DIR_SORT_ADATE = 0;
+				DIR_SORT_NAME = 0;
+			} else if(strcmp(sort_type, "adate") == 0) {
+				DIR_SORT = 1;
+				DIR_SORT_ADATE = 1;
+				DIR_SORT_NAME = 0;
+				DIR_SORT_TYPE = 0;
+			} else if(strcmp(sort_type, "name") == 0) {
+				DIR_SORT = 1;
+				DIR_SORT_NAME = 1;
+				DIR_SORT_ADATE = 0;
+				DIR_SORT_TYPE = 0;
+			}
+		}
+	}
+}
+
 	int main(int argc, char ** argv)
 	{
 		//Store all the flags passed in a vector
@@ -263,10 +292,11 @@ vector<string> * sortFiles(int adate, int name, int type, vector<string> * file_
 			}
 		}
 
+		setFlags(flags);
+
 		if(has_dir)
 			chdir(*dir_string);
-
-			getFiles(".", flags);
+			getFiles(".");
 
 
 	}

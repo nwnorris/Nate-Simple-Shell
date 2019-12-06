@@ -1,3 +1,8 @@
+/*
+Author: Nate Norris
+Project: Linux Programming | Project 3 | Fall '19
+*/
+
 #include <string.h>
 #include <unistd.h>
 #include <stdio.h>
@@ -19,9 +24,16 @@ string prompt_phrase;
 int running = 1;
 vector<pid_t> * foreground_pids;
 vector<pid_t> * background_pids;
+pthread_t * background_thread;
 
 int normalFifo;
 int highPriorityFifo;
+int bgflag = 0;
+
+void prompt()
+{
+	write(STDOUT_FILENO, (prompt_phrase.c_str()), prompt_phrase.length());
+}
 
 void sendResponse(vector<string> * args) {
 	string response_towrite = "";
@@ -31,7 +43,6 @@ void sendResponse(vector<string> * args) {
 
 	int result = open("/tmp/MyShellResponse", O_WRONLY, S_IRWXU);
 	if(result == -1) {
-		write(STDOUT_FILENO, "Waiting for reader on myShellResponse...\n", 41);
 		while(result = open("/tmp/MyShellResponse", O_WRONLY, S_IRWXU) && result == -1){}
 	}
 	int amt_written = write(result, response_towrite.c_str(), response_towrite.length());
@@ -86,6 +97,18 @@ void * monitor_high_priority(void * args) {
 
 }
 
+void * wait_background_pids_helper(void * args) {
+	waitpid(background_pids->at(0), NULL, 0);
+	background_pids->clear();
+	prompt();
+}
+
+void wait_background_pids() {
+	pthread_t background_wait;
+	pthread_create(&background_wait, NULL, wait_background_pids_helper, NULL);
+	pthread_detach(background_wait);
+}
+
 void cwd()
 {
 	char buff[256];
@@ -119,12 +142,6 @@ void update_prompt()
 {
 	prompt_phrase = get_cwd_string() + ">";
 }
-void prompt()
-{
-	//cwd();
-	//write(STDOUT_FILENO, &">", 1);
-	write(STDOUT_FILENO, (prompt_phrase.c_str()), prompt_phrase.length());
-}
 
 string replace_cwd_wildcard(string phrase)
 {
@@ -150,32 +167,37 @@ string replace_cwd_wildcard(string phrase)
 	return original;
 }
 
-int dir(vector<string> * args) {
-
-	//Create char * [] of arguments for exec
-	cout << "Execing: ";
-	char * new_args[(args->size()+1) * sizeof(char *)];
-	args->at(0) = "dir.o";
-	for(int i = 0; i < args->size(); i++)
-	{
-		//Must cast out of const char *
-		cout << args->at(i) << " ";
-		new_args[i] = const_cast<char*>((args->at(i)).c_str());
-	}
-	cout << endl;
-	new_args[(args->size())] = NULL;
-
+int fork_exec(char * file_name, char ** args) {
 	pid_t child = fork();
 	if(child == 0)
 	{
-		execv("dir.o", new_args);
+
+		execv(file_name, args);
 		exit(0);
 	} else {
-		foreground_pids->push_back(child);
-		waitpid(child, NULL, 0);
-		foreground_pids->clear();
+		if(bgflag) {
+			background_pids->push_back(child);
+			wait_background_pids();
+		} else {
+			foreground_pids->push_back(child);
+			waitpid(child, NULL, 0);
+			foreground_pids->clear();
+		}
 		return 0;
 	}
+}
+
+int dir(vector<string> * args) {
+
+	//Create char * [] of arguments for exec
+	char * new_args[(args->size()+1) * sizeof(char *)];
+	for(int i = 0; i < args->size(); i++)
+	{
+		//Must cast out of const char *
+		new_args[i] = const_cast<char*>((args->at(i)).c_str());
+	}
+	new_args[(args->size())] = NULL;
+	return fork_exec("dir.o", new_args);
 
 }
 
@@ -195,7 +217,7 @@ string sys_cmd_searchpath(string cmd) {
 	//Check /bin/
 	if(file_exists_in_directory(cmd, string("/bin")) == 0) path = "/bin/";
 	//Check /usr/bin/
-	if(file_exists_in_directory(cmd, string("/usr/bin")) == 0)path = "/usr/bin/";
+	if(file_exists_in_directory(cmd, string("/usr/bin")) == 0) path = "/usr/bin/";
 
 	return path;
 }
@@ -213,19 +235,8 @@ int sys_cmd(string cmd, vector<string> * args)
 				new_args[i] = const_cast<char*>((args->at(i)).c_str());
 			}
 			new_args[(args->size())] = NULL;
-
-			pid_t child = fork();
-			if(child == 0)
-			{
-				path = path + cmd;
-				execv((path).c_str(), new_args);
-				return -1;
-			} else {
-				foreground_pids->push_back(child);
-				waitpid(child, NULL, 0);
-				foreground_pids->clear();
-				return 0;
-			}
+			char * file_name = const_cast<char *>((path+cmd).c_str());
+			fork_exec(file_name, new_args);
 		}
 }
 
@@ -288,58 +299,13 @@ int * newPipe()
 	return p;
 }
 
-int parse_cmd(char * cmd_word, int cmd_len)
-{
-	if(cmd_len == 1){
-		return 0;
-	}
-	//Convert to string and strip new line.
-	string cmd = (new string(cmd_word))->substr(0,cmd_len-1);
-	vector<string> * args = new vector<string>();
-
-	//Parse cmd + arguments into a vector
-	int space;
-	while((space = cmd.find(" ")) && space <= cmd.length())
-	{
-		args->push_back(cmd.substr(0, space));
-		cmd = cmd.substr(space+1, cmd.length());
-	}
-	args->push_back(cmd);
-
-	int begin = 0;
-	int end  = 0;
-
-	//Parse entire commands with separators
-
-	vector<vector<string> *> * cmds = new vector<vector<string> *>();
-	vector<string> * separators = new vector<string>();
-	for(int i = 0; i < args->size(); i++)
-	{
-		if(args->at(i) == "|" || args->at(i) == ">" || args->at(i) == "<" || i == (args->size()-1))
-		{
-			if(args->at(i) == "|" || args->at(i) == ">" || args->at(i) == "<") separators->push_back(args->at(i));
-
-			end = i;
-			if(i == (args->size() - 1)) end = i+1;
-
-			vector<string> * cmd = new vector<string>();
-			for(int j = begin; j < end; j++)
-			{
-				cmd->push_back(args->at(j));
-
-			}
-			cmds->push_back(cmd);
-			begin = i+1;
-		}
-	}
-
-	if(cmds->size() == 0)
-	{
-		cmds->push_back(args);
-	}
-
+//Given full commands and their separators, pipe or redirect.
+//This method sucks. Sorry you have to look at this. Not proud of this one.
+//Only works for piping OR redirection....not both.
+int parse_cmd_with_separators(vector<vector<string> *> * cmds, vector<string> * separators) {
 	int stdout_save = dup(STDOUT_FILENO);
 
+	//Handle piping
 	if(cmds->size() > 1 && separators->at(0) == "|")
 	{
 		int p[2];
@@ -370,7 +336,7 @@ int parse_cmd(char * cmd_word, int cmd_len)
 			return 0;
 		}
 
-
+		//Handle redirection
 	} else if(cmds->size() > 1 && separators->at(0) == ">")
 	{
 		char * name = const_cast<char*>(cmds->at(1)->at(0).c_str());
@@ -407,6 +373,72 @@ int parse_cmd(char * cmd_word, int cmd_len)
 	return -1;
 }
 
+int parse_cmd(char * cmd_word, int cmd_len)
+{
+	if(cmd_len == 1){
+		return 0;
+	}
+	//Convert to string and strip new line.
+	string cmd = (new string(cmd_word))->substr(0,cmd_len-1);
+	vector<string> * args = new vector<string>();
+
+	//Parse cmd + arguments into a vector
+	int space;
+	while((space = cmd.find(" ")) && space <= cmd.length())
+	{
+		args->push_back(cmd.substr(0, space));
+		cmd = cmd.substr(space+1, cmd.length());
+	}
+	args->push_back(cmd);
+
+	int begin = 0;
+	int end  = 0;
+
+	//Parse separators so we can recognize entire commands
+	vector<vector<string> *> * cmds = new vector<vector<string> *>();
+	vector<string> * separators = new vector<string>();
+
+	int arg_endpoint = args->size();
+	//Check for background thread flag
+	if(args->at(args->size()-1) == "&" && args->size() > 1) {
+		if(background_pids->size() > 0) {
+			return -1;
+		} else {
+			arg_endpoint -= 1;
+			bgflag = 1;
+			args->pop_back();
+		}
+	} else {
+		bgflag = 0;
+	}
+
+	for(int i = 0; i < args->size(); i++)
+	{
+		if(args->at(i) == "|" || args->at(i) == ">" || args->at(i) == "<" || i == (args->size()-1))
+		{
+			if(args->at(i) == "|" || args->at(i) == ">" || args->at(i) == "<") separators->push_back(args->at(i));
+
+			end = i;
+			if(i == (args->size() - 1)) end = i+1;
+
+			vector<string> * cmd = new vector<string>();
+			for(int j = begin; j < end; j++)
+			{
+				cmd->push_back(args->at(j));
+			}
+			cmds->push_back(cmd);
+			begin = i+1;
+		}
+	}
+
+	if(cmds->size() == 0)
+	{
+		cmds->push_back(args);
+	}
+	//Seems like we are ready to fork &/or redirect
+	return parse_cmd_with_separators(cmds, separators);
+}
+
 void run()
 {
 
@@ -419,6 +451,7 @@ void run()
 
 	while(running)
 	{
+
 		prompt();
 		char buff[256];
 		int cmdlen = read(STDIN_FILENO, buff, 256);

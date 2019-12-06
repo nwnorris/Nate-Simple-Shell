@@ -1,1 +1,1 @@
-g++ dir.cpp -o dir.o && ./dir.o
+g++ dir.cpp -o dir

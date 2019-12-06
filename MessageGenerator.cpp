@@ -1,3 +1,8 @@
+/*
+Author: Nate Norris
+Project: Linux Programming | Project 3 | Fall '19
+*/
+
 #include <stdio.h>
 #include <fcntl.h>
 #include <unistd.h>
